@@ -3,6 +3,7 @@
 import json
 import os,re
 import time
+import datetime
 from bot import bot_factory
 from bridge.bridge import Bridge
 from bridge.context import ContextType
@@ -211,9 +212,12 @@ class Summary(Plugin):
             count += last
         return count,summarys
 
-    def _get_user_message_count(self, session_id):
+    def _get_user_message_count(self, session_id, start_time=None):
         c = self.conn.cursor()
-        c.execute("SELECT user, COUNT(*) FROM chat_records WHERE sessionid=? GROUP BY user ORDER BY COUNT(*) DESC", (session_id,))
+        if start_time is None:
+            c.execute("SELECT user, COUNT(*) FROM chat_records WHERE sessionid=? GROUP BY user ORDER BY COUNT(*) DESC", (session_id,))
+        else:
+            c.execute("SELECT user, COUNT(*) FROM chat_records WHERE sessionid=? AND timestamp >= ? GROUP BY user ORDER BY COUNT(*) DESC", (session_id, start_time))
         return c.fetchall()
 
     def on_handle_context(self, e_context: EventContext):
@@ -233,13 +237,27 @@ class Summary(Plugin):
                 if conf().get('channel_type', 'wx') == 'wx' and msg.from_user_nickname is not None:
                     session_id = msg.from_user_nickname
                 
-                user_counts = self._get_user_message_count(session_id)
-                if not user_counts:
+                all_time_counts = self._get_user_message_count(session_id)
+                
+                # 获取当天0点的时间戳
+                today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_timestamp = int(today.timestamp())
+                today_counts = self._get_user_message_count(session_id, today_timestamp)
+
+                if not all_time_counts:
                     reply = Reply(ReplyType.INFO, "当前会话没有聊天记录")
                 else:
-                    reply_text = "用户发言统计：\n"
-                    for user, count in user_counts:
+                    reply_text = "用户发言统计：\n\n全部时间：\n"
+                    for user, count in all_time_counts:
                         reply_text += f"{user}: {count}条消息\n"
+                    
+                    reply_text += "\n今日统计：\n"
+                    if today_counts:
+                        for user, count in today_counts:
+                            reply_text += f"{user}: {count}条消息\n"
+                    else:
+                        reply_text += "今日暂无发言记录\n"
+                    
                     reply = Reply(ReplyType.TEXT, reply_text)
                 
                 e_context['reply'] = reply
@@ -347,5 +365,5 @@ class Summary(Plugin):
             return help_text
         trigger_prefix = conf().get('plugin_trigger_prefix', "$")
         help_text += f"使用方法:\n1. 输入\"{trigger_prefix}总结 最近消息数量\"，我会帮助你总结聊天记录。\n例如：\"{trigger_prefix}总结 100\"，我会总结最近100条消息。\n\n你也可以直接输入\"{trigger_prefix}总结前99条信息\"或\"{trigger_prefix}总结3小时内的最近10条消息\"\n我会尽可能理解你的指令。\n"
-        help_text += f"2. 输入\"{trigger_prefix}统计\"，我会统计当前会话中各用户的发言数量。"
+        help_text += f"2. 输入\"{trigger_prefix}统计\"，我会统计当前会话中各用户的全部发言数量和今日发言数量。"
         return help_text
