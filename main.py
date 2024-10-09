@@ -211,6 +211,10 @@ class Summary(Plugin):
             count += last
         return count,summarys
 
+    def _get_user_message_count(self, session_id):
+        c = self.conn.cursor()
+        c.execute("SELECT user, COUNT(*) FROM chat_records WHERE sessionid=? GROUP BY user ORDER BY COUNT(*) DESC", (session_id,))
+        return c.fetchall()
 
     def on_handle_context(self, e_context: EventContext):
 
@@ -221,7 +225,27 @@ class Summary(Plugin):
         logger.debug("[Summary] on_handle_context. content: %s" % content)
         trigger_prefix = conf().get('plugin_trigger_prefix', "$")
         clist = content.split()
+        
         if clist[0].startswith(trigger_prefix):
+            if clist[0] == trigger_prefix+"统计":
+                msg: ChatMessage = e_context['context']['msg']
+                session_id = msg.from_user_id
+                if conf().get('channel_type', 'wx') == 'wx' and msg.from_user_nickname is not None:
+                    session_id = msg.from_user_nickname
+                
+                user_counts = self._get_user_message_count(session_id)
+                if not user_counts:
+                    reply = Reply(ReplyType.INFO, "当前会话没有聊天记录")
+                else:
+                    reply_text = "用户发言统计：\n"
+                    for user, count in user_counts:
+                        reply_text += f"{user}: {count}条消息\n"
+                    reply = Reply(ReplyType.TEXT, reply_text)
+                
+                e_context['reply'] = reply
+                e_context.action = EventAction.BREAK_PASS
+                return
+            
             limit = 99
             duration = -1
 
@@ -322,5 +346,6 @@ class Summary(Plugin):
         if not verbose:
             return help_text
         trigger_prefix = conf().get('plugin_trigger_prefix', "$")
-        help_text += f"使用方法:输入\"{trigger_prefix}总结 最近消息数量\"，我会帮助你总结聊天记录。\n例如：\"{trigger_prefix}总结 100\"，我会总结最近100条消息。\n\n你也可以直接输入\"{trigger_prefix}总结前99条信息\"或\"{trigger_prefix}总结3小时内的最近10条消息\"\n我会尽可能理解你的指令。"
+        help_text += f"使用方法:\n1. 输入\"{trigger_prefix}总结 最近消息数量\"，我会帮助你总结聊天记录。\n例如：\"{trigger_prefix}总结 100\"，我会总结最近100条消息。\n\n你也可以直接输入\"{trigger_prefix}总结前99条信息\"或\"{trigger_prefix}总结3小时内的最近10条消息\"\n我会尽可能理解你的指令。\n"
+        help_text += f"2. 输入\"{trigger_prefix}统计\"，我会统计当前会话中各用户的发言数量。"
         return help_text
