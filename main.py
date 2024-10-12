@@ -132,6 +132,20 @@ class Summary(Plugin):
         self._insert_record(session_id, cmsg.msg_id, username, context.content, str(context.type), cmsg.create_time, int(is_triggered))
         # logger.debug("[Summary] {}:{} ({})" .format(username, context.content, session_id))
 
+    def _generate_sarcastic_comment(self, least_active_user):
+        llm = ModelFactory().create_llm_model(**build_model_params({
+            "openai_api_key": conf().get("open_ai_api_key", ""),
+            "proxy": conf().get("proxy", ""),
+        }))
+
+        prompt = PromptTemplate(
+            input_variables=["user"],
+            template="你是年轻人,批判现实,思考深刻,语言风趣。语言风格: 鲁迅，罗永浩。擅长一针见血，讽刺幽默。现在按照描述的风格，写一句简短的话，来调侃今天发言最少的人：{user}",
+        )
+        bot = LLMChain(llm=llm, prompt=prompt)
+        comment = bot.run(user=least_active_user)
+        return comment
+
     def _translate_text_to_commands(self, text):
         llm = ModelFactory().create_llm_model(**build_model_params({
             "openai_api_key": conf().get("open_ai_api_key", ""),
@@ -242,7 +256,7 @@ class Summary(Plugin):
                 # 获取当天0点的时间戳
                 today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
                 today_timestamp = int(today.timestamp())
-                today_counts = self._get_user_message_count(session_id, today_timestamp)
+                today_counts = dict(self._get_user_message_count(session_id, today_timestamp))
 
                 if not all_time_counts:
                     reply = Reply(ReplyType.INFO, "当前会话没有聊天记录")
@@ -252,18 +266,25 @@ class Summary(Plugin):
                         reply_text += f"{user}: {count}条消息\n"
                     
                     reply_text += "\n今日统计：\n"
-                    if today_counts:
-                        for user, count in today_counts:
-                            reply_text += f"{user}: {count}条消息\n"
-                    else:
-                        reply_text += "今日暂无发言记录\n"
+                    all_users = set(user for user, _ in all_time_counts)
+                    min_count = float('inf')
+                    min_user = None
+                    for user in all_users:
+                        count = today_counts.get(user, 0)
+                        reply_text += f"{user}: {count}条消息\n"
+                        if count < min_count:
+                            min_count = count
+                            min_user = user
+                    
+                    if min_user:
+                        comment = self._generate_sarcastic_comment(min_user)
+                        reply_text += f"\n@{min_user} \n{comment}"
                     
                     reply = Reply(ReplyType.TEXT, reply_text)
                 
                 e_context['reply'] = reply
                 e_context.action = EventAction.BREAK_PASS
                 return
-            
             limit = 99
             duration = -1
 
