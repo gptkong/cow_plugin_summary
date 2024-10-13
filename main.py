@@ -136,6 +136,7 @@ class Summary(Plugin):
         llm = ModelFactory().create_llm_model(**build_model_params({
             "openai_api_key": conf().get("open_ai_api_key", ""),
             "proxy": conf().get("proxy", ""),
+            "temperature": 0.7,
         }))
 
         prompt = PromptTemplate(
